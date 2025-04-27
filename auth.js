@@ -1,54 +1,68 @@
 const express = require('express');
 const axios = require('axios');
-const qs = require('querystring');
+const qs = require('qs');
+const https = require('https');
+const fs = require('fs');
+const dotenv = require('dotenv');
+
+dotenv.config();
 
 const app = express();
-const port = 8888;
+const PORT = 8888;
 
-// Your credentials from Spotify
-const client_id = '614fe39b9abb4cf38be5ffca0c8e0d9b'; // Replace with your Client ID
-const client_secret = 'a1719e64ba9a4a179ba94d8f168b3764'; // Replace with your Client Secret
-const redirect_uri = 'https://localhost:8888/callback'; // Same as your redirect URI
+// Set up SSL certificate paths
+const options = {
+  key: fs.readFileSync('ssl/server.key'),
+  cert: fs.readFileSync('ssl/server.crt')
+};
 
-// Step 1: Redirect user to Spotify's login page
+// Spotify API credentials from .env
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
+const REDIRECT_URI = 'https://localhost:8888/callback';
+
+// Step 1: Redirect user to Spotify Accounts service
 app.get('/login', (req, res) => {
-  const scope = 'user-library-read user-read-playback-state user-modify-playback-state';
-  res.redirect(
-    `https://accounts.spotify.com/authorize?response_type=code&client_id=${client_id}&scope=${scope}&redirect_uri=${redirect_uri}`
-  );
+  const scope = 'user-library-read user-read-private';
+  const authUrl = `https://accounts.spotify.com/authorize?${qs.stringify({
+    client_id: CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: REDIRECT_URI,
+    scope: scope
+  })}`;
+  res.redirect(authUrl);
 });
 
-// Step 2: Handle the redirect from Spotify after the user logs in
+// Step 2: Handle the callback from Spotify and get the access token
 app.get('/callback', async (req, res) => {
   const code = req.query.code;
-  
+
+  // Exchange code for an access token
   try {
-    const response = await axios.post(
-      'https://accounts.spotify.com/api/token',
-      qs.stringify({
-        code: code,
-        redirect_uri: redirect_uri,
-        grant_type: 'authorization_code',
-      }),
-      {
-        headers: {
-          'Authorization': 'Basic ' + Buffer.from(client_id + ':' + client_secret).toString('base64'),
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
+    const response = await axios.post('https://accounts.spotify.com/api/token', qs.stringify({
+      code: code,
+      redirect_uri: REDIRECT_URI,
+      grant_type: 'authorization_code'
+    }), {
+      headers: {
+        'Authorization': 'Basic ' + Buffer.from(CLIENT_ID + ':' + CLIENT_SECRET).toString('base64'),
+        'Content-Type': 'application/x-www-form-urlencoded'
       }
-    );
+    });
 
-    const access_token = response.data.access_token;
-    const refresh_token = response.data.refresh_token;
+    const { access_token, refresh_token } = response.data;
+    console.log('Access Token:', access_token);
+    console.log('Refresh Token:', refresh_token);
 
-    // Send tokens to browser or save for use in future requests
-    res.send(`Access Token: ${access_token} <br> Refresh Token: ${refresh_token}`);
+    // Redirect user to a success page or home page
+    res.send('Login successful! You can now access your Spotify data.');
   } catch (error) {
-    console.error(error);
-    res.send('Error during authentication');
+    console.error('Error getting access token:', error);
+    res.send('Error during authentication. Please try again.');
   }
 });
 
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
+// Create HTTPS server and listen on the specified port
+https.createServer(options, app).listen(PORT, () => {
+  console.log(`Server running at https://localhost:${PORT}`);
 });
